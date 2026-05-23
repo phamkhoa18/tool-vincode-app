@@ -11,6 +11,7 @@ const officeParser = require('officeparser');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 
 const app = express();
 const PORT = process.env.PORT || 3456;
@@ -92,6 +93,43 @@ const upload = multer({
       cb(new Error(`Không hỗ trợ định dạng ${ext}. Chấp nhận: PDF, Word, Excel, PowerPoint (.pptx), PNG, JPG, WebP, BMP, TIFF`));
     }
   },
+});
+
+// ─── Authentication Middleware ────────────────────
+
+app.use(cookieParser());
+app.use(express.json()); // To parse JSON bodies like /api/login
+
+app.get('/login', (req, res) => {
+  res.sendFile(path.join(__dirname, 'login.html'));
+});
+
+app.post('/api/login', (req, res) => {
+  const { password } = req.body;
+  const INTERNAL_PASSWORD = process.env.INTERNAL_PASSWORD || '050560';
+  
+  if (password === INTERNAL_PASSWORD) {
+    res.cookie('vincode_auth', password, { 
+      maxAge: 30 * 24 * 60 * 60 * 1000, 
+      httpOnly: true 
+    });
+    return res.json({ success: true });
+  }
+  return res.status(401).json({ error: 'Mật khẩu không chính xác' });
+});
+
+// Protect all routes below
+app.use((req, res, next) => {
+  const INTERNAL_PASSWORD = process.env.INTERNAL_PASSWORD || '050560';
+  if (req.cookies.vincode_auth === INTERNAL_PASSWORD) {
+    return next();
+  }
+  
+  if (req.path.startsWith('/api/')) {
+    return res.status(401).json({ error: 'Vui lòng đăng nhập' });
+  }
+  
+  res.redirect('/login?redirect=' + encodeURIComponent(req.originalUrl));
 });
 
 // Serve static files with cache
