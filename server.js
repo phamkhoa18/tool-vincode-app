@@ -450,7 +450,7 @@ async function processOneFile(file) {
       }
     } else if (ext === '.doc') {
       // Old .doc binary format — use word-extractor
-      method = 'Word (.doc) → AI Format';
+      method = 'Word (.doc) → Text';
       console.log(`   📝 Word document (.doc)`);
       const extractor = new WordExtractor();
       const extracted = await extractor.extract(filePath);
@@ -458,9 +458,15 @@ async function processOneFile(file) {
       if (text.trim().length < 10) {
         throw new Error('Không thể đọc nội dung từ file .doc này. Vui lòng lưu lại dưới dạng .docx hoặc PDF.');
       }
-      // Truncate if too large to avoid token limit
+      // Try AI format, fallback to raw text
       const truncated = text.length > 50000 ? text.slice(0, 50000) + '\n\n[... nội dung bị cắt bớt do quá dài ...]' : text;
-      markdown = await processTextPDF(truncated, filename);
+      try {
+        markdown = await processTextPDF(truncated, filename);
+        method = 'Word (.doc) → AI Format';
+      } catch (e) {
+        console.warn(`   ⚠️ AI format failed, returning raw text: ${e.message}`);
+        markdown = `# ${filename}\n\n${truncated}`;
+      }
     } else if (ext === '.docx') {
       method = 'Word → Markdown';
       console.log(`   📝 Word document (.docx)`);
