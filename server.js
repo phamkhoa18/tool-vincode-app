@@ -391,34 +391,7 @@ async function processWordDoc(filePath, filename) {
     codeBlockStyle: 'fenced',
   });
 
-  let markdown = turndown.turndown(html);
-
-  // Only AI polish if content is moderate size (< 50K chars ~ 40K tokens)
-  if (markdown.length > 100 && markdown.length < 50000) {
-    try {
-      const messages = [
-        {
-          role: 'system',
-          content: `Bạn là chuyên gia chỉnh sửa Markdown. Hãy cải thiện cấu trúc Markdown sau:
-- Sửa heading levels cho phù hợp
-- Đảm bảo bảng hiển thị đúng
-- Giữ nguyên toàn bộ nội dung
-- Chỉ trả về Markdown đã chỉnh sửa`,
-        },
-        {
-          role: 'user',
-          content: `Chỉnh sửa Markdown từ tài liệu "${filename}":\n\n${markdown}`,
-        },
-      ];
-      markdown = await callAI(messages);
-    } catch (e) {
-      console.warn('   ⚠️ AI polish failed, using raw conversion:', e.message);
-    }
-  } else if (markdown.length >= 50000) {
-    console.log(`   ⚠️ Doc quá lớn (${markdown.length} chars), skip AI polish`);
-  }
-
-  return markdown;
+  return turndown.turndown(html);
 }
 
 // ─── Core: process a single file (reusable) ───────────────
