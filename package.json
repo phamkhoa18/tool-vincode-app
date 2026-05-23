@@ -21,6 +21,7 @@
     "marked": "^18.0.4",
     "multer": "^2.1.1",
     "mupdf": "^1.27.0",
+    "officeparser": "^7.0.3",
     "pdf-parse": "^2.4.5",
     "sharp": "^0.34.5",
     "turndown": "^7.2.4",

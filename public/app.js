@@ -78,7 +78,7 @@
 
   // ─── File Handling ────────────────────────────
 
-  const ALLOWED = ['.pdf', '.doc', '.docx', '.xlsx', '.xls', '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff'];
+  const ALLOWED = ['.pdf', '.doc', '.docx', '.xlsx', '.xls', '.pptx', '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff'];
 
   function addFiles(files) {
     hideError();

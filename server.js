@@ -7,6 +7,7 @@ const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const WordExtractor = require('word-extractor');
 const XLSX = require('xlsx');
+const officeParser = require('officeparser');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const cors = require('cors');
@@ -83,12 +84,12 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
   defParamCharset: 'utf8', // Fix Vietnamese filename encoding
   fileFilter: (req, file, cb) => {
-    const allowed = ['.pdf', '.doc', '.docx', '.xlsx', '.xls', '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff'];
+    const allowed = ['.pdf', '.doc', '.docx', '.xlsx', '.xls', '.pptx', '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff'];
     const ext = path.extname(file.originalname).toLowerCase();
     if (allowed.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error(`Không hỗ trợ định dạng ${ext}. Chấp nhận: PDF, Word, Excel, PNG, JPG, WebP, BMP, TIFF`));
+      cb(new Error(`Không hỗ trợ định dạng ${ext}. Chấp nhận: PDF, Word, Excel, PowerPoint (.pptx), PNG, JPG, WebP, BMP, TIFF`));
     }
   },
 });
@@ -164,7 +165,8 @@ async function callAI(messages, options = {}) {
 
         // Retry on 5xx / 429
         if ((resp.status >= 500 || resp.status === 429) && attempt < maxRetries) {
-          const wait = (attempt + 1) * 3000;
+          // Longer wait for Rate Limit (429) to cool down
+          const wait = resp.status === 429 ? (attempt + 1) * 6000 : (attempt + 1) * 3000;
           console.warn(`   ⚠️ Retry ${attempt + 1}/${maxRetries} sau ${wait / 1000}s (${resp.status})`);
           await new Promise((r) => setTimeout(r, wait));
           continue;
@@ -349,7 +351,8 @@ async function processScannedPDF(buffer, filename) {
   }
 
   // OCR pages in parallel batches to speed up (avoid Cloudflare 100s timeout)
-  const CONCURRENCY = 5;
+  // Reduced concurrency to 3 and added delay to avoid FPT AI Rate Limit (RPM)
+  const CONCURRENCY = 3;
   const pageResults = [];
   const queue = [...images];
   let completed = 0;
@@ -372,6 +375,8 @@ async function processScannedPDF(buffer, filename) {
       if (completed % 5 === 0 || completed === images.length) {
         console.log(`   ⏳ Tiến độ OCR: ${completed}/${images.length} trang`);
       }
+      // Add slight delay between pages to cool down AI rate limit
+      await new Promise((r) => setTimeout(r, 1500));
     }
   }
 
@@ -487,6 +492,18 @@ async function processOneFile(file) {
         throw new Error('File Excel trống hoặc không đọc được.');
       }
       markdown = `# ${filename.replace(/\.(xlsx|xls)$/i, '')}\n\n${sheets.join('\n\n---\n\n')}`;
+    } else if (ext === '.pptx') {
+      // PowerPoint (.pptx) → Markdown (Extract Text directly, instant)
+      method = 'PowerPoint → Text Extract';
+      console.log(`   📊 PowerPoint file (.pptx)`);
+      try {
+        // officeparser returns the raw text from slides
+        const text = await officeParser.parseOfficeAsync(filePath);
+        const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+        markdown = `# ${filename.replace(/\.pptx$/i, '')}\n\n${lines.join('\n\n')}`;
+      } catch (e) {
+        throw new Error(`Không thể đọc text từ PowerPoint này: ${e.message}`);
+      }
     } else if (['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff'].includes(ext)) {
       method = 'Image → Vision AI OCR';
       console.log(`   🖼️ Image file`);
