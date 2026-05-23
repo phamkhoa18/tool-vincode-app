@@ -80,6 +80,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  defParamCharset: 'utf8', // Fix Vietnamese filename encoding
   fileFilter: (req, file, cb) => {
     const allowed = ['.pdf', '.doc', '.docx', '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff'];
     const ext = path.extname(file.originalname).toLowerCase();
