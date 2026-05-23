@@ -376,7 +376,8 @@ async function processWordDoc(filePath, filename) {
 async function processOneFile(file) {
   const startTime = Date.now();
   const filePath = file.path;
-  const filename = file.originalname;
+  // Normalize Unicode (macOS uses NFD → fix Vietnamese chars)
+  const filename = file.originalname.normalize('NFC');
   const ext = path.extname(filename).toLowerCase();
 
   console.log(`\n📥 Processing: ${filename} (${(file.size / 1024).toFixed(1)}KB)`);

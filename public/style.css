@@ -601,14 +601,36 @@ button {
   min-width: 0;
 }
 
-.result-filename {
+.result-filename-input {
+  font-family: inherit;
   font-size: 0.85rem;
   font-weight: 500;
   color: var(--gray-800);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  padding: 0.15rem 0.35rem;
   max-width: 200px;
+  outline: none;
+  transition: all var(--transition);
+}
+
+.result-filename-input:hover {
+  border-color: var(--gray-300);
+  background: var(--white);
+}
+
+.result-filename-input:focus {
+  border-color: var(--blue-400);
+  background: var(--white);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.result-ext {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--gray-400);
+  margin-left: -0.3rem;
 }
 
 .result-badge {

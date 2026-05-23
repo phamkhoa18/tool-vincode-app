@@ -1,5 +1,5 @@
 /**
- * Doc2MD — Frontend Application (Batch support)
+ * Vindocs — Frontend Application (Batch support)
  * Handles multi-file upload, conversion, and result display
  */
 
@@ -274,13 +274,16 @@
   function appendResult(data) {
     const id = 'result-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
 
+    const baseName = data.filename.replace(/\.[^/.]+$/, '');
+
     const section = document.createElement('div');
     section.className = 'result-section';
     section.id = id;
     section.innerHTML = `
       <div class="result-toolbar">
         <div class="result-meta">
-          <span class="result-filename">${escapeHtml(data.filename)}</span>
+          <input class="result-filename-input" type="text" value="${escapeHtml(baseName)}" spellcheck="false" />
+          <span class="result-ext">.md</span>
           <span class="result-badge">${escapeHtml(data.method)}</span>
           <span class="result-time">${data.elapsed}</span>
         </div>
@@ -324,9 +327,12 @@
       }, 2000);
     });
 
+    const nameInput = section.querySelector('.result-filename-input');
+
     const dlBtn = section.querySelector('.download-btn');
     dlBtn.addEventListener('click', () => {
-      downloadMarkdown(data.filename, data.markdown);
+      const customName = nameInput.value.trim() || baseName;
+      downloadMarkdown(customName, data.markdown);
     });
 
     const rawBtn = section.querySelector('.raw-btn');
@@ -392,8 +398,7 @@
     }
   }
 
-  function downloadMarkdown(originalName, markdown) {
-    const baseName = originalName.replace(/\.[^/.]+$/, '');
+  function downloadMarkdown(baseName, markdown) {
     const blob = new Blob([markdown], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
