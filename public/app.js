@@ -27,6 +27,20 @@
     return name.normalize('NFC');
   }
 
+  // Safe JSON parse (handles nginx HTML errors)
+  async function safeJson(resp) {
+    const text = await resp.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      // Server returned HTML (nginx timeout/error)
+      if (text.includes('timeout') || text.includes('504') || text.includes('524')) {
+        throw new Error('Server quá tải hoặc file xử lý quá lâu. Vui lòng thử lại với file nhỏ hơn.');
+      }
+      throw new Error(`Lỗi server (${resp.status}). Vui lòng thử lại.`);
+    }
+  }
+
   // ─── File Selection ───────────────────────────
 
   browseBtn.addEventListener('click', (e) => {
@@ -197,14 +211,14 @@
     clearInterval(interval);
 
     if (!resp.ok) {
-      const err = await resp.json();
+      const err = await safeJson(resp);
       throw new Error(err.error || `Lỗi server (${resp.status})`);
     }
 
     progressFill.style.width = '100%';
     updateProgressText('Hoàn tất!');
 
-    const data = await resp.json();
+    const data = await safeJson(resp);
 
     setTimeout(() => {
       hideProgress();
@@ -232,13 +246,13 @@
     clearInterval(interval);
 
     if (!resp.ok) {
-      const err = await resp.json();
+      const err = await safeJson(resp);
       throw new Error(err.error || `Lỗi server (${resp.status})`);
     }
 
     progressFill.style.width = '100%';
 
-    const data = await resp.json();
+    const data = await safeJson(resp);
 
     updateProgressText(`Hoàn tất ${data.successCount}/${data.total} file trong ${data.elapsed}`);
 
