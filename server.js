@@ -6,6 +6,7 @@ const fs = require('fs');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const WordExtractor = require('word-extractor');
+const XLSX = require('xlsx');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const cors = require('cors');
@@ -82,12 +83,12 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
   defParamCharset: 'utf8', // Fix Vietnamese filename encoding
   fileFilter: (req, file, cb) => {
-    const allowed = ['.pdf', '.doc', '.docx', '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff'];
+    const allowed = ['.pdf', '.doc', '.docx', '.xlsx', '.xls', '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff'];
     const ext = path.extname(file.originalname).toLowerCase();
     if (allowed.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error(`Không hỗ trợ định dạng ${ext}. Chấp nhận: PDF, Word, PNG, JPG, WebP, BMP, TIFF`));
+      cb(new Error(`Không hỗ trợ định dạng ${ext}. Chấp nhận: PDF, Word, Excel, PNG, JPG, WebP, BMP, TIFF`));
     }
   },
 });
@@ -465,6 +466,33 @@ async function processOneFile(file) {
       method = 'Word → Markdown';
       console.log(`   📝 Word document (.docx)`);
       markdown = await processWordDoc(filePath, filename);
+    } else if (['.xlsx', '.xls'].includes(ext)) {
+      // Excel → Markdown tables (no AI needed)
+      method = 'Excel → Markdown Table';
+      console.log(`   📊 Excel file`);
+      const workbook = XLSX.readFile(filePath);
+      const sheets = [];
+      for (const sheetName of workbook.SheetNames) {
+        const sheet = workbook.Sheets[sheetName];
+        const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        if (data.length === 0) continue;
+
+        let md = `## ${sheetName}\n\n`;
+        // Header row
+        const header = data[0].map((c) => String(c).trim());
+        md += '| ' + header.join(' | ') + ' |\n';
+        md += '| ' + header.map(() => '---').join(' | ') + ' |\n';
+        // Data rows
+        for (let r = 1; r < data.length; r++) {
+          const row = data[r].map((c) => String(c).trim());
+          md += '| ' + row.join(' | ') + ' |\n';
+        }
+        sheets.push(md);
+      }
+      if (sheets.length === 0) {
+        throw new Error('File Excel trống hoặc không đọc được.');
+      }
+      markdown = `# ${filename.replace(/\.(xlsx|xls)$/i, '')}\n\n${sheets.join('\n\n---\n\n')}`;
     } else if (['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff'].includes(ext)) {
       method = 'Image → Vision AI OCR';
       console.log(`   🖼️ Image file`);
