@@ -111,12 +111,14 @@ async function getMupdf() {
 // ─── Helpers ───────────────────────────────────────────────
 
 /**
- * Call AI API (OpenAI-compatible endpoint)
+ * Call AI API with retry + timeout
  */
 async function callAI(messages, options = {}) {
   const apiKey = process.env.AI_API_KEY;
   const apiUrl = process.env.AI_API_URL;
   const model = options.model || process.env.AI_TEXT_MODEL || 'Qwen3-32B';
+  const maxRetries = options.retries ?? 2;
+  const timeoutMs = options.timeout ?? 90000; // 90s
 
   console.log(`   🤖 Calling model: ${model}`);
 
@@ -127,27 +129,69 @@ async function callAI(messages, options = {}) {
     temperature: options.temperature ?? 0.2,
   };
 
-  const resp = await fetch(apiUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`AI API error (${resp.status}): ${errText}`);
+      const resp = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timer);
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        // Parse clean error message
+        let errMsg = `AI API lỗi (${resp.status})`;
+        try {
+          const errJson = JSON.parse(errText);
+          errMsg = errJson.description || errJson.message || errMsg;
+        } catch {
+          if (errText.includes('timeout') || resp.status === 524) {
+            errMsg = 'AI API timeout — server quá tải, thử lại sau';
+          } else if (resp.status === 429) {
+            errMsg = 'Rate limit — gửi quá nhiều request';
+          }
+        }
+
+        // Retry on 5xx / 429
+        if ((resp.status >= 500 || resp.status === 429) && attempt < maxRetries) {
+          const wait = (attempt + 1) * 3000;
+          console.warn(`   ⚠️ Retry ${attempt + 1}/${maxRetries} sau ${wait / 1000}s (${resp.status})`);
+          await new Promise((r) => setTimeout(r, wait));
+          continue;
+        }
+
+        throw new Error(errMsg);
+      }
+
+      const data = await resp.json();
+      let content = data.choices?.[0]?.message?.content || '';
+      content = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+      return content;
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        if (attempt < maxRetries) {
+          console.warn(`   ⚠️ Timeout, retry ${attempt + 1}/${maxRetries}...`);
+          continue;
+        }
+        throw new Error('AI API timeout — hết thời gian chờ');
+      }
+      if (attempt < maxRetries && !err.message.includes('token')) {
+        console.warn(`   ⚠️ Error, retry ${attempt + 1}/${maxRetries}...`);
+        await new Promise((r) => setTimeout(r, (attempt + 1) * 2000));
+        continue;
+      }
+      throw err;
+    }
   }
-
-  const data = await resp.json();
-  let content = data.choices?.[0]?.message?.content || '';
-
-  // Strip <think>...</think> blocks from reasoning models
-  content = content.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-
-  return content;
 }
 
 /**
@@ -294,39 +338,42 @@ Hãy đọc toàn bộ nội dung trong hình ảnh và chuyển thành Markdown
 }
 
 /**
- * Process scanned PDF: convert pages to images, then OCR each page
+ * Process scanned PDF: convert pages to images, then OCR each page independently
  */
 async function processScannedPDF(buffer, filename) {
-  // Step 1: Convert PDF pages to PNG images
   const images = await pdfToImages(buffer);
 
   if (images.length === 0) {
     throw new Error('Không thể render trang nào từ PDF');
   }
 
-  // Step 2: OCR each page with vision model
+  // OCR each page independently — skip failed pages
   const pageResults = [];
 
   for (const img of images) {
     console.log(`   🔍 OCR page ${img.pageNum}/${images.length}...`);
     const pageContext = images.length > 1 ? ` (trang ${img.pageNum}/${images.length})` : '';
-    const result = await processImageWithVision(img.base64, img.mime, filename, pageContext);
-    pageResults.push(result);
+    try {
+      const result = await processImageWithVision(img.base64, img.mime, filename, pageContext);
+      pageResults.push({ pageNum: img.pageNum, content: result, ok: true });
+    } catch (err) {
+      console.warn(`   ⚠️ Page ${img.pageNum} failed: ${err.message}`);
+      pageResults.push({ pageNum: img.pageNum, content: `> ⚠️ Trang ${img.pageNum}: Không thể OCR (${err.message})`, ok: false });
+    }
   }
 
-  // Step 3: Combine results
+  // Check if all pages failed
+  const okPages = pageResults.filter((p) => p.ok);
+  if (okPages.length === 0) {
+    throw new Error('Không thể OCR được trang nào. AI API có thể đang quá tải.');
+  }
+
   if (pageResults.length === 1) {
-    return pageResults[0];
+    return pageResults[0].content;
   }
 
-  // Multiple pages: combine with page separators
   return pageResults
-    .map((content, i) => {
-      if (images.length > 1) {
-        return `<!-- Trang ${i + 1} -->\n\n${content}`;
-      }
-      return content;
-    })
+    .map((p) => `<!-- Trang ${p.pageNum} -->\n\n${p.content}`)
     .join('\n\n---\n\n');
 }
 
@@ -337,7 +384,6 @@ async function processWordDoc(filePath, filename) {
   const result = await mammoth.convertToHtml({ path: filePath });
   const html = result.value;
 
-  // Use Turndown to convert HTML to Markdown
   const TurndownService = require('turndown');
   const turndown = new TurndownService({
     headingStyle: 'atx',
@@ -346,8 +392,8 @@ async function processWordDoc(filePath, filename) {
 
   let markdown = turndown.turndown(html);
 
-  // If content is substantial, use AI to polish
-  if (markdown.length > 100) {
+  // Only AI polish if content is moderate size (< 50K chars ~ 40K tokens)
+  if (markdown.length > 100 && markdown.length < 50000) {
     try {
       const messages = [
         {
@@ -367,6 +413,8 @@ async function processWordDoc(filePath, filename) {
     } catch (e) {
       console.warn('   ⚠️ AI polish failed, using raw conversion:', e.message);
     }
+  } else if (markdown.length >= 50000) {
+    console.log(`   ⚠️ Doc quá lớn (${markdown.length} chars), skip AI polish`);
   }
 
   return markdown;
@@ -410,7 +458,9 @@ async function processOneFile(file) {
       if (text.trim().length < 10) {
         throw new Error('Không thể đọc nội dung từ file .doc này. Vui lòng lưu lại dưới dạng .docx hoặc PDF.');
       }
-      markdown = await processTextPDF(text, filename);
+      // Truncate if too large to avoid token limit
+      const truncated = text.length > 50000 ? text.slice(0, 50000) + '\n\n[... nội dung bị cắt bớt do quá dài ...]' : text;
+      markdown = await processTextPDF(truncated, filename);
     } else if (ext === '.docx') {
       method = 'Word → Markdown';
       console.log(`   📝 Word document (.docx)`);
@@ -481,9 +531,10 @@ app.post('/api/convert-batch', convertLimiter, upload.array('files', 20), async 
   }
   await Promise.all(workers);
 
-  const orderedResults = req.files.map((f) =>
-    results.find((r) => r.filename === f.originalname) || { success: false, filename: f.originalname, error: 'Unknown error' }
-  );
+  const orderedResults = req.files.map((f) => {
+    const normalized = f.originalname.normalize('NFC');
+    return results.find((r) => r.filename === normalized) || { success: false, filename: normalized, error: 'Unknown error' };
+  });
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   const successCount = orderedResults.filter((r) => r.success).length;
