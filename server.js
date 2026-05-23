@@ -214,7 +214,7 @@ async function pdfHasText(buffer) {
  * Convert PDF pages to PNG images using mupdf (WASM)
  * Returns array of { base64: string, mime: string, pageNum: number }
  */
-async function pdfToImages(buffer, maxPages = 10) {
+async function pdfToImages(buffer, maxPages = 100) {
   const mupdf = await getMupdf();
 
   // Open the PDF document from buffer
