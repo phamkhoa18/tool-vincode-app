@@ -22,6 +22,11 @@
 
   let selectedFiles = [];
 
+  // Fix Vietnamese filenames (macOS NFD → NFC)
+  function normalizeName(name) {
+    return name.normalize('NFC');
+  }
+
   // ─── File Selection ───────────────────────────
 
   browseBtn.addEventListener('click', (e) => {
@@ -119,7 +124,7 @@
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
             <polyline points="14 2 14 8 20 8"/>
           </svg>
-          <span class="file-name">${escapeHtml(f.name)}</span>
+          <span class="file-name">${escapeHtml(normalizeName(f.name))}</span>
           <span class="file-size">${formatSize(f.size)}</span>
         </div>
         <button class="remove-btn" data-index="${i}" title="Xóa">
@@ -183,7 +188,7 @@
       progressFill.style.width = progress + '%';
     }, 500);
 
-    updateProgressText(`Đang xử lý ${file.name}...`);
+    updateProgressText(`Đang xử lý ${normalizeName(file.name)}...`);
 
     const formData = new FormData();
     formData.append('file', file);
@@ -274,7 +279,7 @@
   function appendResult(data) {
     const id = 'result-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
 
-    const baseName = data.filename.replace(/\.[^/.]+$/, '');
+    const baseName = normalizeName(data.filename).replace(/\.[^/.]+$/, '');
 
     const section = document.createElement('div');
     section.className = 'result-section';
