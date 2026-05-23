@@ -348,20 +348,41 @@ async function processScannedPDF(buffer, filename) {
     throw new Error('Không thể render trang nào từ PDF');
   }
 
-  // OCR each page independently — skip failed pages
+  // OCR pages in parallel batches to speed up (avoid Cloudflare 100s timeout)
+  const CONCURRENCY = 5;
   const pageResults = [];
+  const queue = [...images];
+  let completed = 0;
 
-  for (const img of images) {
-    console.log(`   🔍 OCR page ${img.pageNum}/${images.length}...`);
-    const pageContext = images.length > 1 ? ` (trang ${img.pageNum}/${images.length})` : '';
-    try {
-      const result = await processImageWithVision(img.base64, img.mime, filename, pageContext);
-      pageResults.push({ pageNum: img.pageNum, content: result, ok: true });
-    } catch (err) {
-      console.warn(`   ⚠️ Page ${img.pageNum} failed: ${err.message}`);
-      pageResults.push({ pageNum: img.pageNum, content: `> ⚠️ Trang ${img.pageNum}: Không thể OCR (${err.message})`, ok: false });
+  async function processQueue() {
+    while (queue.length > 0) {
+      const img = queue.shift();
+      if (!img) continue;
+
+      console.log(`   🔍 OCR page ${img.pageNum}/${images.length}...`);
+      const pageContext = images.length > 1 ? ` (trang ${img.pageNum}/${images.length})` : '';
+      try {
+        const result = await processImageWithVision(img.base64, img.mime, filename, pageContext);
+        pageResults.push({ pageNum: img.pageNum, content: result, ok: true });
+      } catch (err) {
+        console.warn(`   ⚠️ Page ${img.pageNum} failed: ${err.message}`);
+        pageResults.push({ pageNum: img.pageNum, content: `> ⚠️ Trang ${img.pageNum}: Không thể OCR (${err.message})`, ok: false });
+      }
+      completed++;
+      if (completed % 5 === 0 || completed === images.length) {
+        console.log(`   ⏳ Tiến độ OCR: ${completed}/${images.length} trang`);
+      }
     }
   }
+
+  const workers = [];
+  for (let i = 0; i < Math.min(CONCURRENCY, images.length); i++) {
+    workers.push(processQueue());
+  }
+  await Promise.all(workers);
+
+  // Sort back to original order since async processing mixes them up
+  pageResults.sort((a, b) => a.pageNum - b.pageNum);
 
   // Check if all pages failed
   const okPages = pageResults.filter((p) => p.ok);
